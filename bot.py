@@ -186,119 +186,140 @@ async def on_ready():
     print(f"Hapination Live conectado como {bot.user}")
 
 
+
 # =========================
-# PAINEL
+# PAINEL INTERATIVO
 # =========================
+
+class HapinationPanel(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=300)
+
+    @discord.ui.button(label="Enviar vídeo", emoji="🎥", style=discord.ButtonStyle.primary, row=0)
+    async def enviar(self, interaction, button):
+        await interaction.response.send_message(
+            "Para enviar um vídeo, utilize o comando `/enviar_video`.",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="Iniciar live", emoji="🔴", style=discord.ButtonStyle.success, row=0)
+    async def iniciar(self, interaction, button):
+        await interaction.response.send_message(
+            "Para iniciar sua sessão simulada, utilize `/iniciar`.",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="Saldo", emoji="💰", style=discord.ButtonStyle.primary, row=0)
+    async def saldo(self, interaction, button):
+        ensure_user(interaction.user.id)
+        valor = get_credits(interaction.user.id)
+        await interaction.response.send_message(
+            f"💰 Seu saldo: **{money(valor)}**",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="Encerrar live", emoji="⏹️", style=discord.ButtonStyle.danger, row=0)
+    async def encerrar(self, interaction, button):
+        user_id = interaction.user.id
+
+        with db() as con:
+            sessao = con.execute(
+                "SELECT id FROM sessions WHERE user_id=? AND status='running' ORDER BY id DESC LIMIT 1",
+                (user_id,)
+            ).fetchone()
+
+            if not sessao:
+                await interaction.response.send_message(
+                    "Você não possui uma sessão ativa.",
+                    ephemeral=True
+                )
+                return
+
+            con.execute(
+                "UPDATE sessions SET status='ended', ended_at=CURRENT_TIMESTAMP WHERE id=?",
+                (sessao["id"],)
+            )
+
+        await interaction.response.send_message(
+            "⏹️ Sessão encerrada.",
+            ephemeral=True
+        )
+
+
+    @discord.ui.button(label="Meus vídeos", emoji="📁", style=discord.ButtonStyle.secondary, row=1)
+    async def meus_videos(self, interaction, button):
+        with db() as con:
+            videos = con.execute(
+                "SELECT id, filename FROM videos WHERE user_id=? ORDER BY id DESC LIMIT 10",
+                (interaction.user.id,)
+            ).fetchall()
+
+        if not videos:
+            mensagem = "Você ainda não enviou vídeos."
+        else:
+            mensagem = "\n".join(
+                f"🎬 **#{v['id']}** — {v['filename']}" for v in videos
+            )
+
+        await interaction.response.send_message(
+            mensagem, ephemeral=True
+        )
+
+    @discord.ui.button(label="Adicionar créditos", emoji="➕", style=discord.ButtonStyle.success, row=1)
+    async def adicionar(self, interaction, button):
+        if not is_owner(interaction.user.id):
+            await interaction.response.send_message(
+                "⛔ Apenas o proprietário pode adicionar créditos.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message(
+            "Utilize `/adicionar_creditos` para adicionar créditos.",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="Renovar", emoji="🔄", style=discord.ButtonStyle.primary, row=1)
+    async def renovar(self, interaction, button):
+        await interaction.response.send_message(
+            "Utilize `/renovar` para renovar sua sessão.",
+            ephemeral=True
+        )
+
+    @discord.ui.button(label="Horas", emoji="⏱️", style=discord.ButtonStyle.secondary, row=1)
+    async def horas(self, interaction, button):
+        linhas = [
+            f"**{h} hora(s)** — {money(preco)}"
+            for h, preco in SESSION_PRICES.items()
+        ]
+
+        await interaction.response.send_message(
+            "⏱️ **Tabela de duração**\n\n" + "\n".join(linhas),
+            ephemeral=True
+        )
+
 
 @bot.tree.command(
     name="painel",
-    description="Abre o painel do Hapination Live"
+    description="Abre o painel interativo do Hapination Live"
 )
 async def painel(interaction: discord.Interaction):
-
     embed = discord.Embed(
         title="🎬 HAPINATION LIVE",
         description=(
             "Bem-vindo ao painel de gerenciamento!\n\n"
-            "Escolha os comandos abaixo para gerenciar "
-            "seus vídeos e sessões de demonstração.\n\n"
-            "⚠️ Esta versão utiliza sessões simuladas. "
-            "Não existe transmissão externa nem cobrança real."
+            "Escolha uma das opções abaixo para continuar.\n\n"
+            "⚠️ Sistema de demonstração com sessões simuladas."
         ),
-        color=discord.Color.dark_purple()
+        color=discord.Color.from_rgb(35, 25, 48)
     )
 
-    embed.add_field(
-        name="⏱️ TABELA DE DURAÇÕES",
-        value=(
-            "```"
-            "\n1 hora     | R$ 1,00"
-            "\n6 horas    | R$ 1,25"
-            "\n12 horas   | R$ 1,50"
-            "\n18 horas   | R$ 1,75"
-            "\n24 horas   | R$ 2,00"
-            "\n```"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="📁 Biblioteca",
-        value=(
-            "`/enviar_video` — cadastrar um vídeo.\n"
-            "`/meus_videos` — consultar seus vídeos."
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="🎥 Sessões",
-        value=(
-            "`/iniciar` — iniciar usando um vídeo e escolhendo a duração.\n"
-            "`/renovar` — renovar uma sessão encerrada ou vencida.\n"
-            "`/encerrar` — encerrar sua sessão ativa."
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="💳 Créditos",
-        value=(
-            "`/saldo` — consultar seus créditos fictícios.\n"
-            "`/horas` — consultar as durações e preços.\n"
-            "`/adicionar_creditos` — comando exclusivo do proprietário."
-        ),
-        inline=False
-    )
-
-    embed.set_footer(
-        text="Hapination Live • Protótipo de demonstração"
-    )
-
-    explicacoes = discord.Embed(
-        title="📖 COMO UTILIZAR CADA OPÇÃO",
-        color=discord.Color.dark_purple()
-    )
-
-    explicacoes.description = (
-        "**📤 Enviar vídeo**\n"
-        "Registra um vídeo na sua biblioteca pessoal.\n\n"
-
-        "**📂 Meus vídeos**\n"
-        "Mostra os vídeos cadastrados e seus respectivos IDs.\n\n"
-
-        "**▶️ Iniciar sessão**\n"
-        "Escolha um vídeo e a duração desejada. "
-        "O sistema desconta os créditos fictícios correspondentes.\n\n"
-
-        "**🔄 Renovar**\n"
-        "Permite renovar uma sessão que já venceu ou foi encerrada.\n\n"
-
-        "**⏹️ Encerrar sessão**\n"
-        "Finaliza sua sessão simulada atual.\n\n"
-
-        "**💰 Saldo**\n"
-        "Mostra a quantidade de créditos fictícios disponíveis.\n\n"
-
-        "**⏱️ Horas**\n"
-        "Apresenta as opções de duração e seus respectivos preços.\n\n"
-
-        "**👑 Adicionar créditos**\n"
-        "Comando exclusivo do proprietário para adicionar créditos "
-        "fictícios a um usuário."
-    )
-
-    await interaction.response.defer(ephemeral=True)
-
-    await interaction.followup.send(
-        embeds=[embed, explicacoes],
+    await interaction.response.send_message(
+        embed=embed,
+        view=HapinationPanel(),
         ephemeral=True
     )
 
-
-# =========================
-# CONSULTAR HORAS
-# =========================
 
 @bot.tree.command(
     name="horas",
