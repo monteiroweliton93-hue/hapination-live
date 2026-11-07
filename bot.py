@@ -304,19 +304,36 @@ class HapinationPanel(discord.ui.View):
     description="Abre o painel interativo do Hapination Live"
 )
 async def painel(interaction: discord.Interaction):
+    caminho = Path("painel_tiktok.jpg")
+
+    if not caminho.exists():
+        await interaction.response.send_message(
+            "Imagem do painel não encontrada.",
+            ephemeral=True
+        )
+        return
+
+    imagem = discord.File(
+        caminho,
+        filename="painel_tiktok.jpg"
+    )
+
     embed = discord.Embed(
         title="🎬 HAPINATION LIVE",
         description=(
             "Bem-vindo ao painel de gerenciamento!\n\n"
-            "Escolha uma das opções abaixo para continuar.\n\n"
+            "Escolha uma opção abaixo para continuar.\n\n"
             "⚠️ Sistema de demonstração com sessões simuladas."
         ),
         color=discord.Color.from_rgb(35, 25, 48)
     )
 
+    embed.set_image(url="attachment://painel_tiktok.jpg")
+
     await interaction.response.send_message(
         embed=embed,
         view=HapinationPanel(),
+        file=imagem,
         ephemeral=True
     )
 
