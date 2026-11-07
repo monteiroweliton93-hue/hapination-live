@@ -195,21 +195,21 @@ class HapinationPanel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=300)
 
-    @discord.ui.button(label="Enviar vídeo", emoji="🎥", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="Enviar vídeo", style=discord.ButtonStyle.secondary, row=0)
     async def enviar(self, interaction, button):
         await interaction.response.send_message(
             "Para enviar um vídeo, utilize o comando `/enviar_video`.",
             ephemeral=True
         )
 
-    @discord.ui.button(label="Iniciar live", emoji="🔴", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="Iniciar live", style=discord.ButtonStyle.secondary, row=0)
     async def iniciar(self, interaction, button):
         await interaction.response.send_message(
             "Para iniciar sua sessão simulada, utilize `/iniciar`.",
             ephemeral=True
         )
 
-    @discord.ui.button(label="Saldo", emoji="💰", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="Saldo", style=discord.ButtonStyle.secondary, row=0)
     async def saldo(self, interaction, button):
         ensure_user(interaction.user.id)
         valor = get_credits(interaction.user.id)
@@ -218,7 +218,7 @@ class HapinationPanel(discord.ui.View):
             ephemeral=True
         )
 
-    @discord.ui.button(label="Encerrar live", emoji="⏹️", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="Encerrar live", style=discord.ButtonStyle.danger, row=0)
     async def encerrar(self, interaction, button):
         user_id = interaction.user.id
 
@@ -246,7 +246,7 @@ class HapinationPanel(discord.ui.View):
         )
 
 
-    @discord.ui.button(label="Meus vídeos", emoji="📁", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Meus vídeos", style=discord.ButtonStyle.secondary, row=1)
     async def meus_videos(self, interaction, button):
         with db() as con:
             videos = con.execute(
@@ -265,7 +265,7 @@ class HapinationPanel(discord.ui.View):
             mensagem, ephemeral=True
         )
 
-    @discord.ui.button(label="Adicionar créditos", emoji="➕", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="Adicionar créditos", style=discord.ButtonStyle.secondary, row=1)
     async def adicionar(self, interaction, button):
         if not is_owner(interaction.user.id):
             await interaction.response.send_message(
@@ -279,14 +279,14 @@ class HapinationPanel(discord.ui.View):
             ephemeral=True
         )
 
-    @discord.ui.button(label="Renovar", emoji="🔄", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="Renovar", style=discord.ButtonStyle.secondary, row=1)
     async def renovar(self, interaction, button):
         await interaction.response.send_message(
             "Utilize `/renovar` para renovar sua sessão.",
             ephemeral=True
         )
 
-    @discord.ui.button(label="Horas", emoji="⏱️", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Horas", style=discord.ButtonStyle.secondary, row=1)
     async def horas(self, interaction, button):
         linhas = [
             f"**{h} hora(s)** — {money(preco)}"
