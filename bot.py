@@ -38,12 +38,20 @@ class HapinationBot(commands.Bot):
         log.info("Banco de dados migrado e verificado.")
 
         # 2) Carregar cogs.
-        for ext in INITIAL_EXTENSIONS:
-            try:
+        carregadas: list[str] = []
+        try:
+            for ext in INITIAL_EXTENSIONS:
                 await self.load_extension(ext)
+                carregadas.append(ext)
                 log.info("Cog carregado: %s", ext)
-            except Exception:
-                log.exception("Falha ao carregar cog %s", ext)
+        except Exception:
+            log.exception("Falha ao carregar cog essencial %s; inicialização cancelada.", ext)
+            for loaded in reversed(carregadas):
+                try:
+                    await self.unload_extension(loaded)
+                except Exception:
+                    log.exception("Falha ao descarregar cog %s durante rollback.", loaded)
+            raise
 
         # 3) Sincronizar comandos de aplicação.
         try:

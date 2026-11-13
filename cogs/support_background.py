@@ -184,7 +184,7 @@ class ConfirmCloseTicketView(discord.ui.View):
             self.ticket_id,
             closed_by=interaction.user.id,
             reason="fechamento manual",
-            notify_user=True,
+            should_notify_user=True,
         )
         self.stop()
 
@@ -726,7 +726,7 @@ class SupportBackgroundCog(commands.Cog, name="SupportBackground"):
         *,
         closed_by: int,
         reason: str,
-        notify_user: bool = True,
+        should_notify_user: bool = True,
     ) -> None:
         """Marca closed, registra em 📋・registros, notifica o usuário e agenda
         a exclusão do canal após 10s. Idempotente (só afeta status='open')."""
@@ -769,7 +769,7 @@ class SupportBackgroundCog(commands.Cog, name="SupportBackground"):
         else:
             log.info("Ticket #%s fechado (%s), mas guilda do canal não encontrada para registro.", ticket_id, reason)
 
-        if notify_user:
+        if should_notify_user:
             emb = info_embed(
                 "Atendimento fechado",
                 f"Seu ticket **#{ticket_id}** foi fechado.\nMotivo: {reason}.\n"
@@ -817,7 +817,7 @@ class SupportBackgroundCog(commands.Cog, name="SupportBackground"):
                         int(row["id"]),
                         closed_by=bot_id,
                         reason=f"inatividade > {hours}h (automático)",
-                        notify_user=True,
+                        should_notify_user=True,
                     )
                 except Exception:
                     log.exception("Falha ao fechar ticket inativo %s", row["id"])

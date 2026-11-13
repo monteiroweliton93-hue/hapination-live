@@ -48,9 +48,14 @@ def backup_db(dest: Path) -> Path:
     dst = sqlite3.connect(dest)
     try:
         src.backup(dst)
+        check = dst.execute("PRAGMA integrity_check").fetchone()
+        if not check or check[0] != "ok":
+            raise sqlite3.DatabaseError(f"Backup SQLite inválido: {check[0] if check else 'sem resultado'}")
     finally:
         dst.close()
         src.close()
+    if not dest.exists() or dest.stat().st_size <= 0:
+        raise OSError(f"Backup não foi criado corretamente: {dest}")
     return dest
 
 
@@ -75,10 +80,8 @@ def migrate() -> None:
     """Aplica migrações de forma idempotente. Faz backup prévio se o banco já existir."""
     if config.DB_PATH.exists() and config.DB_PATH.stat().st_size > 0:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        try:
-            backup_db(config.BACKUP_DIR / f"pre_migration_{ts}.db")
-        except Exception as exc:  # não bloqueia a migração, mas loga
-            print(f"[migrate] AVISO: backup prévio falhou: {exc}")
+        # Segurança: nunca migra um banco existente se o backup prévio falhar.
+        backup_db(config.BACKUP_DIR / f"pre_migration_{ts}.db")
 
     with get_db() as con:
         con.execute(

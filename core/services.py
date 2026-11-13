@@ -99,7 +99,7 @@ def minute_cost_millicents(price_cents: int, total_minutes: int) -> int:
     """Custo por minuto em milésimos de centavo (inteiro, sem erro de ponto flutuante)."""
     if total_minutes <= 0:
         return 0
-    return (price_cents * 1000) // total_minutes
+    return (price_cents * 1000 + total_minutes - 1) // total_minutes
 
 
 def billing_step(

@@ -866,6 +866,18 @@ class UsersCreditsCog(commands.Cog, name="UsersCredits"):
                 ephemeral=True,
             )
             return
+        # A tabela admins é a fonte de verdade; revoga também as ACLs
+        # individuais que o bot concedeu nos canais restritos.
+        panel_cog = self.bot.get_cog("PanelCog")
+        acl_failures: list[str] = []
+        if panel_cog is not None:
+            acl_failures = await panel_cog.revoke_staff_permissions(usuario.id)
+        else:
+            acl_failures = ["PanelCog indisponível; ACLs do Discord não verificadas"]
+            log.error(
+                "UsersCredits: PanelCog indisponível ao revogar ACL do usuário %s",
+                usuario.id,
+            )
         await notify_user(
             self.bot,
             usuario.id,
@@ -875,13 +887,26 @@ class UsersCreditsCog(commands.Cog, name="UsersCredits"):
                 "removidos pelo proprietário.",
             ),
         )
-        await interaction.response.send_message(
-            embed=success_embed(
-                "Administrador removido",
-                f"{usuario.mention} (`{usuario.id}`) não é mais administrador.",
-            ),
-            ephemeral=True,
-        )
+        if acl_failures:
+            await interaction.response.send_message(
+                embed=warn_embed(
+                    "Administrador removido; revisão de acesso pendente",
+                    f"{usuario.mention} não é mais administrador no banco. "
+                    "Não foi possível confirmar a revogação de todas as permissões "
+                    "individuais no Discord. Verifique os canais avisos/administração "
+                    f"nas guildas: {', '.join(acl_failures)}.",
+                ),
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                embed=success_embed(
+                    "Administrador removido",
+                    f"{usuario.mention} (`{usuario.id}`) não é mais administrador "
+                    "e as permissões individuais gerenciadas foram revogadas.",
+                ),
+                ephemeral=True,
+            )
 
     @admins.command(name="listar", description="Lista todos os administradores (proprietário).")
     @owner_only

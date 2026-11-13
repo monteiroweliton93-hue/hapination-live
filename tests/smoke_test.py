@@ -26,6 +26,7 @@ cfg.DB_PATH = Path(_tmp) / "smoke.db"
 cfg.BACKUP_DIR = Path(_tmp) / "backups"
 cfg.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
+from core.database import migrate  # noqa: E402
 from bot import HapinationBot, INITIAL_EXTENSIONS  # noqa: E402
 
 
@@ -34,6 +35,15 @@ async def main() -> int:
     bot = HapinationBot()
     carregadas = []
     try:
+        migrate()
+        # Confere que a migração criou as tabelas exigidas pelos cogs.
+        import sqlite3
+        with sqlite3.connect(cfg.DB_PATH) as con:
+            tabelas = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        for obrigatoria in ("tickets", "users", "videos", "sessions"):
+            if obrigatoria not in tabelas:
+                falhas += 1
+                print(f"  [FALHA] tabela {obrigatoria} ausente após migrate().")
         for ext in INITIAL_EXTENSIONS:
             try:
                 await bot.load_extension(ext)
@@ -80,6 +90,15 @@ async def main() -> int:
                 else:
                     falhas += 1
                     print(f"  [FALHA] UsersCredits.{metodo} não é async callable.")
+
+        # 4) Revogação de ACLs individuais ao remover administrador.
+        pc = bot.get_cog("PanelCog")
+        fn = getattr(pc, "revoke_staff_permissions", None) if pc else None
+        if callable(fn) and inspect.iscoroutinefunction(fn):
+            print("  [OK] PanelCog.revoke_staff_permissions é async callable.")
+        else:
+            falhas += 1
+            print("  [FALHA] PanelCog.revoke_staff_permissions não é async callable.")
 
         # 4) force_end_session no SessionsPrices.
         sp = bot.get_cog("SessionsPrices")

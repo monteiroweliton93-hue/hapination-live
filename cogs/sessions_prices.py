@@ -382,68 +382,93 @@ class SessionsPricesCog(commands.Cog, name="SessionsPrices"):
     async def on_ready(self) -> None:
         if self._ready:
             return
-        self._ready = True
         try:
             await self._recover_downtime()
         except Exception:
-            log.exception("Falha na recuperação de downtime.")
+            log.exception("Falha na recuperação de downtime; cobrança não iniciada.")
+            return
+
         if not self.billing_loop.is_running():
             try:
                 self.billing_loop.start()
                 log.info("Loop de cobrança/heartbeat iniciado.")
             except Exception:
                 log.exception("Não foi possível iniciar o loop de cobrança.")
+                return
+
+        self._ready = True
 
     async def _recover_downtime(self) -> None:
-        """Lê last_heartbeat, estende expires_at das sessões running pelo gap
-        (tempo de indisponibilidade NÃO é cobrado), zera avisos se ainda longe
-        e notifica os usuários por DM."""
+        """Compensa o tempo offline das sessões e impede cobrança desse intervalo."""
+        notified: dict[int, int] = {}
+
         with get_db() as con:
             raw = get_setting(con, "last_heartbeat", None)
             last_hb = parse_iso(raw) if raw else None
             now = now_utc()
+
+            gap_seconds = 0
             if last_hb is None:
-                gap_seconds = 0
+                log.warning(
+                    "last_heartbeat ausente: não é possível determinar "
+                    "o downtime anterior. O intervalo desconhecido não "
+                    "será cobrado, mas também não poderá ser compensado."
+                )
             else:
-                gap_seconds = int((now - last_hb).total_seconds())
-            # Gap menor que ~90s é normal (reinício rápido). Não notifica.
-            if gap_seconds < 90:
-                set_setting(con, "last_heartbeat", _iso(now))
-                return
+                gap_seconds = max(0, int((now - last_hb).total_seconds()))
+
             rows = con.execute(
                 "SELECT * FROM sessions WHERE status='running'"
             ).fetchall()
-            notified: dict[int, int] = {}  # user_id -> total segundos estendidos
+
             for r in rows:
                 exp = parse_iso(r["expires_at"]) or now
                 new_exp = exp + timedelta(seconds=gap_seconds)
                 new_dt = r["downtime_seconds"] + gap_seconds
-                # Não cobra o gap: avança last_billed_at para agora.
+
                 new_warned_expiry = r["warned_expiry"]
                 new_warned_low = r["warned_low_credit"]
+
                 if (new_exp - now).total_seconds() > config.EXPIRY_WARN_MINUTES * 60:
                     new_warned_expiry = 0
                     new_warned_low = 0
+
                 con.execute(
                     """UPDATE sessions
                        SET expires_at=?, downtime_seconds=?, last_billed_at=?,
                            warned_expiry=?, warned_low_credit=?
-                       WHERE id=?""",
-                    (_iso(new_exp), new_dt, _iso(now), new_warned_expiry, new_warned_low, r["id"]),
+                       WHERE id=? AND status='running'""",
+                    (
+                        _iso(new_exp), new_dt, _iso(now),
+                        new_warned_expiry, new_warned_low, r["id"],
+                    ),
                 )
-                notified[r["user_id"]] = notified.get(r["user_id"], 0) + gap_seconds
+
+                if gap_seconds >= 90:
+                    notified.setdefault(r["user_id"], gap_seconds)
+
             set_setting(con, "last_heartbeat", _iso(now))
 
         for user_id, secs in notified.items():
-            e = info_embed(
-                "Bot voltou ao ar",
-                f"O Hapination Live ficou indisponível por **{fmt_duration(secs)}**.\n"
-                "Esse tempo **não foi cobrado** e foi adicionado de volta às suas "
-                "sessões simuladas ativas.",
+            try:
+                e = info_embed(
+                    "Bot voltou ao ar",
+                    f"O Hapination Live ficou indisponível por **{fmt_duration(secs)}**.\\n"
+                    "Esse tempo **não foi cobrado** e foi adicionado de volta às suas "
+                    "sessões simuladas ativas.",
+                )
+                await notify_user(self.bot, user_id, e)
+            except Exception:
+                log.exception(
+                    "Falha ao notificar usuário %s sobre recuperação de downtime.",
+                    user_id,
+                )
+
+        if gap_seconds >= 90:
+            log.info(
+                "Downtime de %ds recuperado: %d usuário(s) notificado(s).",
+                gap_seconds, len(notified),
             )
-            await notify_user(self.bot, user_id, e)
-        if notified:
-            log.info("Downtime de %ds recuperado: %d usuário(s) notificado(s).", gap_seconds, len(notified))
 
     # =======================================================================
     # 1) CRUD de durações / preços  (/admin duracao ...)
@@ -903,8 +928,9 @@ class SessionsPricesCog(commands.Cog, name="SessionsPrices"):
 
         last_billed = parse_iso(r["last_billed_at"]) or parse_iso(r["started_at"]) or now
         elapsed_min = int((now - last_billed).total_seconds() // 60)
-        # Segurança: nunca cobra mais que 2 min num único tick (recovery já tratou downtime).
-        elapsed_min = max(0, min(elapsed_min, 2))
+        # A recuperação de downtime já exclui o período offline. Em operação normal,
+        # cobrar todo o intervalo evita perder minutos quando o loop atrasa.
+        elapsed_min = max(0, elapsed_min)
 
         chargeable = 0
         if elapsed_min >= 1:

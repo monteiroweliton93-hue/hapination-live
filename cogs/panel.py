@@ -187,13 +187,16 @@ class PanelCog(commands.Cog):
     async def on_ready(self) -> None:
         if self._ready_done:
             return
-        self._ready_done = True
+        success = True
         for guild in self.bot.guilds:
             try:
                 await self.ensure_structure(guild)
                 await self.ensure_public_panel(guild)
             except Exception:
+                success = False
                 log.exception("PanelCog: falha ao preparar estrutura/painel na guilda %s", guild.id)
+        # Permite nova tentativa no próximo on_ready após erro transitório.
+        self._ready_done = success
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
@@ -284,12 +287,13 @@ class PanelCog(commands.Cog):
                     log.error("PanelCog: sem permissão para criar o canal %s na guilda %s", name, guild.id)
                     continue
             else:
-                # garante que está dentro da categoria correta
+                # Garante a categoria correta sem recriar nem renomear o canal.
                 if channel.category_id != category.id:
-                    try:
-                        await channel.edit(category=category)
-                    except Exception:
-                        log.warning("PanelCog: não foi possível mover %s para a categoria", channel.id)
+                    await channel.edit(category=category, reason="Organização dos canais do Hapination Live")
+                # Atualiza somente as permissões administradas pelo bot.
+                # Overwrites personalizados de outros cargos/membros e demais
+                # bits de permissão são preservados.
+                await self._apply_channel_overwrites(channel, guild, key)
             with get_db() as con:
                 set_setting(con, f"channel_{key}", str(channel.id))
         return category
@@ -327,6 +331,83 @@ class PanelCog(commands.Cog):
                 view_channel=True, send_messages=True, manage_messages=True, read_message_history=True,
             )
         return ow
+
+    async def _apply_channel_overwrites(
+        self, channel: discord.TextChannel, guild: discord.Guild, channel_key: str
+    ) -> None:
+        """Aplica ACLs do Hapination em canal existente sem apagar ACLs alheias.
+
+        Atualiza apenas @everyone, o próprio bot e membros atualmente
+        cadastrados como equipe. Permissões não gerenciadas permanecem intactas.
+        """
+        desired = await self._channel_overwrites(guild, channel_key)
+        managed_fields = {
+            "view_channel", "send_messages", "read_message_history",
+        }
+        for target, target_overwrite in desired.items():
+            current = channel.overwrites_for(target)
+            fields = set(managed_fields)
+            if target == guild.me:
+                fields.update({"manage_messages", "embed_links", "attach_files"})
+            elif isinstance(target, discord.Member):
+                fields.add("manage_messages")
+            for field in fields:
+                setattr(current, field, getattr(target_overwrite, field))
+            await channel.set_permissions(
+                target,
+                overwrite=current,
+                reason="Atualização das permissões gerenciadas do Hapination Live",
+            )
+
+    async def revoke_staff_permissions(self, user_id: int) -> list[str]:
+        """Revoga ACLs individuais gerenciadas do ex-administrador.
+
+        Limpa somente permissões de visualização, envio, histórico e gestão
+        de mensagens nos cinco canais gerenciados pelo Hapination. Outros
+        bits e permissões de cargos permanecem intactos.
+        Retorna a lista de canais cuja atualização falhou.
+        """
+        failures: list[str] = []
+        for guild in self.bot.guilds:
+            member = guild.get_member(user_id)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(user_id)
+                except discord.NotFound:
+                    # O usuário não está mais na guilda; não há ACL ativa
+                    # para uma conta membro que possa ser atualizada.
+                    continue
+                except discord.HTTPException:
+                    failures.append(f"{guild.id}: membro não pôde ser consultado")
+                    log.exception(
+                        "PanelCog: falha ao consultar ex-administrador %s na guilda %s",
+                        user_id, guild.id,
+                    )
+                    continue
+
+            for key in ("painel", "suporte", "avisos", "registros", "administracao"):
+                channel = self._get_channel(guild, key)
+                if channel is None:
+                    continue
+                current = channel.overwrites_for(member)
+                for field in (
+                    "view_channel", "send_messages", "read_message_history",
+                    "manage_messages",
+                ):
+                    setattr(current, field, None)
+                try:
+                    await channel.set_permissions(
+                        member,
+                        overwrite=None if current.is_empty() else current,
+                        reason="Revogação de privilégios de administrador do Hapination Live",
+                    )
+                except (discord.Forbidden, discord.HTTPException):
+                    failures.append(f"{guild.id}/{key}")
+                    log.exception(
+                        "PanelCog: falha ao revogar ACL do ex-administrador %s no canal %s",
+                        user_id, channel.id,
+                    )
+        return failures
 
     def _staff_ids(self) -> list[int]:
         ids: set[int] = set()
